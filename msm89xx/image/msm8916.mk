@@ -35,8 +35,8 @@ define Device/yiming-uz801v3
   SUPPORTED_DEVICES := yiming,uz801-v3
   FILESYSTEMS := squashfs
   DEVICE_PACKAGES := wpad-basic-wolfssl rmtfs uci-usb-gadget \
-                     block-mount f2fs-tools \
-                     msm-firmware-dumper
+                   block-mount f2fs-tools
+
 endef
 TARGET_DEVICES += yiming-uz801v3
 
