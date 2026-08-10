@@ -1,3 +1,4 @@
+#msm89xx/image/generate_squashfs_gpt.sh
 #!/bin/sh
 # SPDX-License-Identifier: GPL-2.0-only
 #

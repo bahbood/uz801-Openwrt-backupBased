@@ -1,3 +1,4 @@
+#msm89xx/image/msm8916.mk
 # SPDX-License-Identifier: GPL-2.0-only
 
 ifeq ($(SUBTARGET),msm8916)

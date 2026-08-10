@@ -1,3 +1,4 @@
+# msm89xx/image/flash.sh
 #!/bin/bash
 # SPDX-License-Identifier: GPL-2.0-only
 #

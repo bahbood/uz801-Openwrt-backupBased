@@ -1,3 +1,4 @@
+# msm89xx/image/Makefile
 # SPDX-License-Identifier: GPL-2.0-only
 
 include $(TOPDIR)/rules.mk

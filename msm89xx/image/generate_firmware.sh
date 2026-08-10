@@ -1,3 +1,4 @@
+#msm89xx/image/generate_firmware.sh
 #!/bin/bash
 # SPDX-License-Identifier: GPL-2.0-only
 #
