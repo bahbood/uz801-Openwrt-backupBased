@@ -1,0 +1,38 @@
+#!/bin/sh /etc/rc.common
+
+START=95
+STOP=10
+
+NAME=msm-firmware-dumper
+PROG="/usr/bin/msm-firmware-dumper"
+FLAG="/lib/firmware/DUMPED"
+
+start() {
+	local timeout=30
+	while [ $timeout -gt 0 ]; do
+		if mount | grep -q "overlayfs:/overlay"; then
+			logger -t "$NAME" "Overlay mounted, proceeding"
+			break
+		fi
+		sleep 1
+		timeout=$((timeout - 1))
+	done
+	
+	if [ $timeout -eq 0 ]; then
+		logger -t "$NAME" "ERROR: Overlay not mounted after ${timeout}s"
+		return 1
+	fi
+
+    [ -f "$FLAG" ] && return 0
+	
+	logger -t "$NAME" "Starting firmware dump"
+	
+	if FLAG="$FLAG" $PROG; then
+		logger -t "$NAME" "Firmware dump successful, rebooting"
+		sleep 1
+		reboot
+	else
+		logger -t "$NAME" "Firmware dump FAILED"
+		return 1
+	fi
+}
