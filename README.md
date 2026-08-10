@@ -1,79 +1,160 @@
-# OpenWrt for UZ801 modem
+# OpenWrt for UZ801 (backup-based / empty eMMC)
 
-# Changes in this fork
+OpenWrt port for the **YiMing / FY UZ801 V3 / V3.2** USB 4G modem (Qualcomm MSM8916).
 
-ModemManager crashed the modem on this device, so custom packages were written to manage cellular connection and SMS, along with corresponding LuCI apps. Scripts are based on postmarketOS wiki advice.
+This fork is designed for the case where the device **eMMC is empty, corrupted, or not usable**, and all required radio/modem data must come from a **local factory firmware backup** instead of being read from the live device.
 
-Citation from postmarketOS wiki:
-
-> On my UZ801 V3.2, the process of getting a fresh pmOS image to connect to LTE was rather painful. The internet lists some misleading instructions (qmi-network script does not work out of the box here), and in other cases suggests setting sysctl keys which do not exist. This device also does not work with ModemManager, nor ofono, straight up crashing the latter. Hence, all of this has been determined through manual trial and error.
-
-`alias q='qmicli -d /dev/wwan0qmi0'`
-
-> Device-specific quirks:
-> - Setting the data format through `q --wda-set-data-format=raw-ip` does not seem to work. It falsely returns success, but `--wda-set-data-format` says 802-3 still. Instead, append `--device-open-net='net-raw-ip|net-no-qos-header'` to the `wds-start-network` call
-> - `--client-cid=...` is evil and will hang `qmicli`. Of note, it doesn't hang the modem, just causes it to never respond, and `qmicli` is bad at handling timeouts
-> - `--wds-go-dormant` / `--wds-go-active` doesn't do anything. Generally my version seems to be quite cut down, even `--wds-get-supported-messages` fails
-> - `--client-no-release-cid` fails, use `--wds-follow-network` instead. This will lock up your shell, however. To disconnect, first ^C so `qmicli` sends a disconnection request to the modem, then ^Z, then `killall -9 qmicli` (otherwise it'll hang forever)
-> - `qmicli` seems to be randomly unable to receive status back from the modem. This will result in "error: operation failed: Transaction timed out". This Is Fine™
-
-sms-tool and [luci-app-3ginfo-lite](https://github.com/4IceG/luci-app-3ginfo-lite) also crashed the modem.
-
-## Removed
-
-- WireGuard
-- ModemManager
-- AmneziaWG
-
-## Added / Improved
-
-- Russian language
-- NFQUEUE + PBR
-- mailsend
-- sing-box
-- SMB server (ksmbd)
-- Kernel patch for counting RX/TX packets and bytes
-- USB Gadget (RNDIS) always enabled for reliable management access
-- Default LAN IP: `192.168.2.1`
-- Hostname: `OpenWRT-UZ801`
-- WiFi SSID: `OpenWRT-UZ801`
-- Firewall lan zone kept open (input/output/forward ACCEPT) for USB management
-- DHCP range tuned (start 100, limit 150, leasetime 5d)
-- tsens EPROBE_DEFER propagation patch
-
-## Packages written from scratch
-
-- **zhihe-qmi** + **luci-proto-zhiheqmi** – cellular connection. Add `modem` interface with protocol `Zhihe/Yiming QMI`.
-- **modem-at-engine** – ubus service to send AT commands without crashing the modem.
-- **sms-sqlite-sync** + **luci-app-sms-sqlite** – checks for new SMS every 3 minutes, stores them in SQLite, optional email notification. LuCI app for viewing/sending SMS.
-- **luci-app-cellular-info** – cellular connection info, signal strength, nearby cells.
-- **uci-usb-gadget** + **luci-app-usb-gadget** – USB Gadget management (RNDIS for Ethernet-over-USB).
-
-Unfortunately, IPv6 on the cellular connection could not be set up yet.
+Based on the work of [hkfuertes/msm8916-openwrt](https://github.com/hkfuertes/msm8916-openwrt) and [ImMALWARE/uz801-openwrt](https://github.com/ImMALWARE/uz801-openwrt).
 
 ---
 
-# Default access after first boot
+## Main differences of this fork
 
-| Item              | Value              |
-|-------------------|--------------------|
-| LAN IP            | `192.168.2.1`      |
-| Hostname          | `OpenWRT-UZ801`    |
-| WiFi SSID         | `OpenWRT-UZ801`    |
-| USB RNDIS         | Enabled by default |
-| LuCI / SSH        | Available on LAN (including USB Ethernet) |
-
-Even if WiFi hangs or the SIM/modem has problems, you can still reach the device via USB Ethernet (RNDIS).
+| Feature | Upstream | This fork |
+|---------|----------|-----------|
+| Modem firmware source | Dumped from device on first boot (`msm-firmware-dumper`) | Embedded in the image from a local backup |
+| Radio / NV partitions (`fsc`, `fsg`, `modemst1`, `modemst2`) | Backed up from live device during flash | Taken from `stock-firmware-extract/radio/` |
+| Assumption about eMMC | Stock or previously working firmware present | eMMC may be empty / unusable |
+| ModemManager | Removed (crashes the modem) | Removed |
+| Cellular stack | Custom `zhihe-qmi` + LuCI apps | Same |
 
 ---
 
-# How to install from Linux computer
+## What is included
 
-1. Download all files from the latest OpenWrt release [](https://github.com/ImMALWARE/uz801-openwrt/releases).
-2. Enable ADB on the modem by opening http://192.168.100.1/usbdebug.html
-3. Install `adb` and [edl tools](https://github.com/bkerler/edl) on your computer.
-4. When connected to the modem via USB, run `adb reboot edl` to reboot into EDL mode.
-5. Make a full backup of the original firmware:
-   ```sh
-   edl rf stock.bin
-   edl rl stock --genxml
+### Firmware embedded in the image
+- Modem firmware (`mba.mbn`, `modem.mdt`, `modem.b*`)
+- WiFi firmware (`wcnss.mdt`, `wcnss.b*`)
+- WiFi NVRAM (`WCNSS_qcom_wlan_nv.bin`)
+- Carrier config (`MCFG_SW.MBN`)
+
+These files are placed under:
+
+```text
+msm89xx/base-files/lib/firmware/
+
+and are available immediately after first boot at /lib/firmware/.
+Radio partitions (flashed separately)
+Located in:
+textstock-firmware-extract/radio/
+├── fsc.bin
+├── fsg.bin
+├── modemst1.bin
+└── modemst2.bin
+These contain IMEI, calibration and EFS data and must come from your own device backup.
+Custom packages
+
+zhihe-qmi + luci-proto-zhiheqmi – cellular connection (QMI)
+modem-at-engine – safe AT command interface
+sms-sqlite-sync + luci-app-sms-sqlite – SMS storage & optional e-mail
+luci-app-cellular-info – signal / cell info
+uci-usb-gadget + luci-app-usb-gadget – USB RNDIS / gadget management
+
+
+Default access after first boot
+
+
+Item,Value
+LAN IP,192.168.2.1
+Hostname,OpenWRT-UZ801
+WiFi SSID,OpenWRT-UZ801
+USB RNDIS,Enabled by default
+LuCI / SSH,Available on LAN (including USB Ethernet)
+
+ItemValueLAN IP192.168.2.1HostnameOpenWRT-UZ801WiFi SSIDOpenWRT-UZ801USB RNDISEnabled by defaultLuCI / SSHAvailable on LAN (including USB Ethernet)
+Even if WiFi or the cellular modem fails, you can still reach the device via USB RNDIS.
+
+Requirements
+
+Linux PC
+edl tool
+A full factory backup of your UZ801 (or at least the four radio partition files listed above)
+Device in EDL mode
+
+Entering EDL mode
+
+From stock Android (if still working):
+adb reboot edl
+(enable ADB first via http://192.168.100.1/usbdebug.html)
+Hardware method: short the EDL pads / D+ and GND on the USB connector while plugging in
+
+
+Building
+Bashgit clone https://github.com/bahbood/uz801-pureOpenwrt2.git
+cd uz801-pureOpenwrt2
+./build.sh
+Build output will be in:
+textopenwrt/bin/targets/msm89xx/msm8916/
+Important artifacts:
+
+*-squashfs-boot.img
+*-squashfs-system.img
+*-squashfs-gpt_both0.bin
+*-firmware.zip (aboot / hyp / rpm / sbl1 / tz)
+flash.sh
+
+
+Flashing (empty eMMC / backup-based)
+
+Put the device into EDL mode.
+Copy the four radio files next to the build output or keep the project layout so that flash.sh can find:textstock-firmware-extract/radio/{fsc,fsg,modemst1,modemst2}.bin
+From the build output directory run:Bashchmod +x flash.sh
+./flash.sh
+
+The script will:
+
+Flash the new GPT
+Flash bootloader images (aboot, hyp, rpm, sbl1, tz)
+Flash OpenWrt boot + rootfs
+Write the radio partitions from your local backup
+Reboot the device
+
+Do not use radio partition files from another device – this can destroy the IMEI or leave the modem permanently offline.
+
+After first boot – cellular setup
+
+Connect via USB RNDIS or WiFi.
+Open LuCI at http://192.168.2.1.
+Go to Network → Interfaces → Add new interface.
+Name it modem, protocol Zhihe/Yiming QMI.
+Save & Apply.
+
+If the modem stays offline or does not attach:
+
+Try a different MCFG_SW.MBN (region-specific files can be extracted from your original modem.bin).
+Check that fsc / fsg / modemst1 / modemst2 were written correctly.
+
+
+Project layout (important paths)
+textuz801-pureOpenwrt2/
+├── msm89xx/
+│   ├── base-files/lib/firmware/     # modem + WiFi firmware embedded in image
+│   └── image/
+│       ├── flash.sh                 # backup-based EDL flasher
+│       ├── generate_firmware.sh     # builds aboot/hyp, downloads rpm/sbl1/tz
+│       └── msm8916.mk
+├── packages/                        # custom LuCI & modem packages
+├── stock-firmware-extract/
+│   └── radio/                       # fsc, fsg, modemst1, modemst2
+├── build.sh
+└── diffconfig_uz801
+
+Notes & warnings
+
+This image is larger than upstream builds because modem firmware is included.
+msm-firmware-dumper is intentionally disabled (not present in DEVICE_PACKAGES).
+Bootloader components rpm.mbn, sbl1.mbn and tz.mbn still come from the Qualcomm DragonBoard 410c reference package (via generate_firmware.sh). This is intentional for mainline compatibility.
+Always keep a full edl rf backup of any working unit before experimenting.
+
+
+Credits
+
+hkfuertes/msm8916-openwrt
+ImMALWARE/uz801-openwrt
+AlienWolfX/UZ801-USB-MODEM
+postmarketOS MSM8916 / Zhihe documentation
+msm8916-mainline (lk2nd, qhypstub, qtestsign)
+
+
+License
+Same as upstream OpenWrt and the respective package licenses.
