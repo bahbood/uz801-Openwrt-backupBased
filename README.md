@@ -30,7 +30,6 @@ Based on the work of [hkfuertes/msm8916-openwrt](https://github.com/hkfuertes/ms
 
 These files are placed under:
 
-```text
 msm89xx/base-files/lib/firmware/
 
 and are available immediately after first boot at /lib/firmware/.
