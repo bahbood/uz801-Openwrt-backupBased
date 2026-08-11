@@ -135,6 +135,7 @@ Project layout (important paths)
 uz801-pureOpenwrt2/
 
 ├── msm89xx/
+
 │   ├── base-files/lib/firmware/     # modem + WiFi firmware embedded in image
 
 │   └── image/
