@@ -162,9 +162,13 @@ Always keep a full edl rf backup of any working unit before experimenting.
 Credits
 
 hkfuertes/msm8916-openwrt
+
 ImMALWARE/uz801-openwrt
+
 AlienWolfX/UZ801-USB-MODEM
+
 postmarketOS MSM8916 / Zhihe documentation
+
 msm8916-mainline (lk2nd, qhypstub, qtestsign)
 
 
