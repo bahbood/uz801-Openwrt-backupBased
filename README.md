@@ -125,7 +125,8 @@ Check that fsc / fsg / modemst1 / modemst2 were written correctly.
 
 
 Project layout (important paths)
-textuz801-pureOpenwrt2/
+
+uz801-pureOpenwrt2/
 ├── msm89xx/
 │   ├── base-files/lib/firmware/     # modem + WiFi firmware embedded in image
 │   └── image/
