@@ -20,7 +20,7 @@ sed -i 's/"device": "eth0"/"device": "br-lan"/g' /etc/board.json
 # msm89xx is not available on downloads.openwrt.org
 # ------------------------------------------------------------
 
-sed -i '|/targets/msm89xx/msm8916/packages|d' \
+sed -i '\|/targets/msm89xx/msm8916/packages|d' ...
     /etc/apk/repositories.d/distfeeds.list 2>/dev/null || true
 
 # ------------------------------------------------------------
