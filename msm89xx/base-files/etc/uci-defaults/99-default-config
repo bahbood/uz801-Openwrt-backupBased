@@ -73,12 +73,12 @@ uci set firewall.@zone[0].forward='ACCEPT'
 
 uci set usbgadget.usb.enabled='1'
 
-uci set usbgadget.rndis.enabled='1'
+uci set usbgadget.rndis.enabled='0'
 uci set usbgadget.ncm.enabled='1'
 
 # Emergency serial console (disabled for now)
-# uci set usbgadget.acm.enabled='1'
-# uci set usbgadget.acm.shell='1'
+ uci set usbgadget.acm.enabled='1'
+ uci set usbgadget.acm.shell='1'
 
 # ------------------------------------------------------------
 # Wi-Fi
