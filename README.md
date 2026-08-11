@@ -37,9 +37,13 @@ Radio partitions (flashed separately)
 Located in:
 textstock-firmware-extract/radio/
 ├── fsc.bin
+
 ├── fsg.bin
+
 ├── modemst1.bin
+
 └── modemst2.bin
+
 These contain IMEI, calibration and EFS data and must come from your own device backup.
 Custom packages
 
@@ -127,17 +131,29 @@ Check that fsc / fsg / modemst1 / modemst2 were written correctly.
 Project layout (important paths)
 
 uz801-pureOpenwrt2/
+
 ├── msm89xx/
+
 │   ├── base-files/lib/firmware/     # modem + WiFi firmware embedded in image
+
 │   └── image/
+
 │       ├── flash.sh                 # backup-based EDL flasher
+
 │       ├── generate_firmware.sh     # builds aboot/hyp, downloads rpm/sbl1/tz
+
 │       └── msm8916.mk
+
 ├── packages/                        # custom LuCI & modem packages
+
 ├── stock-firmware-extract/
+
 │   └── radio/                       # fsc, fsg, modemst1, modemst2
+
 ├── build.sh
+
 └── diffconfig_uz801
+
 
 Notes & warnings
 
