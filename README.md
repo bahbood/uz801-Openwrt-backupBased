@@ -37,11 +37,8 @@ Radio partitions (flashed separately)
 Located in:
 textstock-firmware-extract/radio/
 ├── fsc.bin
-
 ├── fsg.bin
-
 ├── modemst1.bin
-
 └── modemst2.bin
 
 These contain IMEI, calibration and EFS data and must come from your own device backup.
@@ -133,7 +130,6 @@ Project layout (important paths)
 uz801-pureOpenwrt2/
 
 ├── msm89xx/
-
 │   ├── base-files/lib/firmware/     # modem + WiFi firmware embedded in image
 
 │   └── image/
