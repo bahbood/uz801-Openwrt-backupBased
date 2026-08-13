@@ -1,2 +1,9 @@
-# Auto detect text files and perform LF normalization
+# همه فایل‌های متنی به LF تبدیل شوند
 * text=auto
+
+# فایل‌های شل و پایتون حتماً LF باشند
+*.sh text eol=lf
+*.py text eol=lf
+
+# فایل‌های ویندوزی (مثل bat) حتماً CRLF باشند
+*.bat text eol=crlf
