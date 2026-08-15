@@ -1,4 +1,3 @@
-```bash
 # build.sh
 #!/bin/bash
 set -e
@@ -389,4 +388,4 @@ echo "Commit  : $OPENWRT_COMMIT"
 echo
 echo "AmneziaWG/AWG: DISABLED / REMOVED"
 echo
-```
+
