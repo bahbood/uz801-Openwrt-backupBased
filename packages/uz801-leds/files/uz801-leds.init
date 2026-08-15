@@ -1,0 +1,48 @@
+#!/bin/sh /etc/rc.common
+
+START=99
+STOP=10
+
+start() {
+	# Wait for Wi-Fi interface
+	timeout=60
+	while [ ! -e /sys/class/net/phy0-ap0 ] && [ "$timeout" -gt 0 ]; do
+		sleep 1
+		timeout=$((timeout - 1))
+	done
+
+	# Blue = Wi-Fi
+	if [ -e /sys/class/net/phy0-ap0 ]; then
+		echo netdev > /sys/class/leds/blue:wlan/trigger
+		echo phy0-ap0 > /sys/class/leds/blue:wlan/device_name
+		echo 1 > /sys/class/leds/blue:wlan/link
+		echo 0 > /sys/class/leds/blue:wlan/rx
+		echo 0 > /sys/class/leds/blue:wlan/tx
+	fi
+
+	# Wait for LTE interface
+	timeout=60
+	while [ ! -e /sys/class/net/wwan0 ] && [ "$timeout" -gt 0 ]; do
+		sleep 1
+		timeout=$((timeout - 1))
+	done
+
+	# Green = LTE/WAN
+	if [ -e /sys/class/net/wwan0 ]; then
+		echo netdev > /sys/class/leds/green:wan/trigger
+		echo wwan0 > /sys/class/leds/green:wan/device_name
+		echo 1 > /sys/class/leds/green:wan/link
+		echo 0 > /sys/class/leds/green:wan/rx
+		echo 0 > /sys/class/leds/green:wan/tx
+	fi
+
+	# Red = Power
+	echo none > /sys/class/leds/red:power/trigger
+	echo 1 > /sys/class/leds/red:power/brightness
+}
+
+stop() {
+	# Restore power LED
+	echo none > /sys/class/leds/red:power/trigger
+	echo 1 > /sys/class/leds/red:power/brightness
+}
