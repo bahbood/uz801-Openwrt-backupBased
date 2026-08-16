@@ -24,8 +24,11 @@ define Build/Compile
 endef
 
 define Package/zhihe-qmi/install
-	$(INSTALL_DIR) $(1)/lib/netifd/proto
-	$(INSTALL_BIN) ./files/zhiheqmi.sh $(1)/lib/netifd/proto/zhiheqmi.sh
+        $(INSTALL_DIR) $(1)/lib/netifd/proto
+        $(INSTALL_BIN) ./files/zhiheqmi.sh $(1)/lib/netifd/proto/zhiheqmi.sh
+
+        $(INSTALL_DIR) $(1)/etc/init.d
+        $(INSTALL_BIN) ./files/zhihe-qmi-recovery.init $(1)/etc/init.d/zhihe-qmi-recovery
 endef
 
 $(eval $(call BuildPackage,zhihe-qmi))

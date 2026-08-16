@@ -1,0 +1,126 @@
+#!/bin/sh /etc/rc.common
+
+START=98
+STOP=10
+
+DEVICE="/dev/wwan0qmi0"
+INTERFACE="QMI"
+PIDFILE="/var/run/zhihe-qmi-recovery.pid"
+
+start() {
+	[ -f "$PIDFILE" ] && {
+		PID="$(cat "$PIDFILE" 2>/dev/null)"
+		[ -n "$PID" ] && kill -0 "$PID" 2>/dev/null && return 0
+		rm -f "$PIDFILE"
+	}
+
+	logger -t qmi-recovery "Recovery monitor started"
+
+	(
+		trap 'exit 0' INT TERM
+
+		device_seen=0
+		recovery_pending=0
+		recovery_busy=0
+
+		while true; do
+			if [ -c "$DEVICE" ]; then
+				if [ "$device_seen" -eq 0 ]; then
+					device_seen=1
+					recovery_pending=0
+					logger -t qmi-recovery "QMI device detected"
+				fi
+			else
+				if [ "$device_seen" -eq 1 ]; then
+					device_seen=0
+					recovery_pending=1
+					logger -t qmi-recovery \
+						"QMI device disappeared; waiting for recovery"
+				fi
+
+				sleep 2
+				continue
+			fi
+
+			if [ "$recovery_pending" -eq 1 ] && [ "$recovery_busy" -eq 0 ]; then
+				# Give remoteproc/QMI time to settle after recovery.
+				sleep 5
+
+				if [ -c "$DEVICE" ]; then
+					status="$(ubus call network.interface.$INTERFACE status 2>/dev/null)"
+
+					if echo "$status" | grep -q '"up": true'; then
+						wds_status="$(
+							qmicli \
+								-d "$DEVICE" \
+								--device-open-proxy \
+								--wds-get-packet-service-status \
+								2>/dev/null
+						)"
+
+						if echo "$wds_status" |
+							grep -q "Connection status: 'disconnected'"; then
+
+							recovery_busy=1
+
+							logger -t qmi-recovery \
+								"QMI device recovered but WDS is disconnected; restarting QMI"
+
+							ifdown "$INTERFACE"
+							sleep 5
+							ifup "$INTERFACE"
+
+							# Let zhihe-qmi establish the data session.
+							sleep 30
+
+							logger -t qmi-recovery \
+								"QMI recovery attempt completed"
+
+							recovery_pending=0
+							recovery_busy=0
+						else
+							logger -t qmi-recovery \
+								"QMI device recovered and WDS is already connected"
+
+							recovery_pending=0
+						fi
+					else
+						recovery_busy=1
+
+						logger -t qmi-recovery \
+							"QMI device recovered but interface is down; starting QMI"
+
+						ifup "$INTERFACE"
+
+						# Let zhihe-qmi establish the data session.
+						sleep 30
+
+						logger -t qmi-recovery \
+							"QMI interface startup attempt completed"
+
+						recovery_pending=0
+						recovery_busy=0
+					fi
+				fi
+			fi
+
+			sleep 2
+		done
+	) &
+
+	echo "$!" > "$PIDFILE"
+}
+
+stop() {
+	if [ -f "$PIDFILE" ]; then
+		PID="$(cat "$PIDFILE" 2>/dev/null)"
+		[ -n "$PID" ] && kill "$PID" 2>/dev/null || true
+		rm -f "$PIDFILE"
+	fi
+}
+
+restart() {
+	stop
+	sleep 1
+	start
+}
