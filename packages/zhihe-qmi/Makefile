@@ -28,7 +28,12 @@ define Package/zhihe-qmi/install
         $(INSTALL_BIN) ./files/zhiheqmi.sh $(1)/lib/netifd/proto/zhiheqmi.sh
 
         $(INSTALL_DIR) $(1)/etc/init.d
-        $(INSTALL_BIN) ./files/zhihe-qmi-recovery.init $(1)/etc/init.d/zhihe-qmi-recovery
+        $(INSTALL_BIN) ./files/zhihe-qmi-recovery.init \
+                $(1)/etc/init.d/zhihe-qmi-recovery
+
+        $(INSTALL_DIR) $(1)/etc/rc.d
+        $(LN) ../init.d/zhihe-qmi-recovery \
+                $(1)/etc/rc.d/S98zhihe-qmi-recovery
 endef
 
 $(eval $(call BuildPackage,zhihe-qmi))
