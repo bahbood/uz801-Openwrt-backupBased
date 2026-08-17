@@ -2,7 +2,7 @@
 
 OpenWrt port for the **YiMing / FY UZ801 V3 / V3.2** USB 4G modem (Qualcomm MSM8916).
 
-This fork is designed for the case where the device **eMMC is empty, corrupted, or not usable**, and all required radio/modem data must come from a **local factory firmware backup** instead of being read from the live device.
+This fork is designed for devices where the **eMMC is empty, corrupted, or otherwise unusable**, and required radio/modem data must be supplied from a **local factory firmware backup** instead of being read from the live device.
 
 Based on the work of:
 
@@ -20,8 +20,10 @@ Based on the work of:
 | Assumption about eMMC | Stock or previously working firmware present | eMMC may be empty / unusable |
 | ModemManager | Removed | Removed |
 | Cellular stack | Standard modem handling | Custom `zhihe-qmi` + LuCI apps |
+| LTE recovery | Device dependent | Automatic QMI data-session recovery after modem/WWAN port recovery |
 | LED control | Device Tree definitions | Persistent UZ801-specific runtime LED configuration |
-| USB access | Device dependent | USB RNDIS enabled by default |
+| USB access | Device dependent | USB RNDIS/NCM gadget enabled by default |
+| rootfs_data handling | Fixed flashing behavior | User-selectable keep, backup/restore, recreate, or backup-only |
 
 ---
 
@@ -45,7 +47,7 @@ The current tested configuration uses:
 
 This configuration has been tested on the UZ801 and is currently preferred for stability.
 
-CPU performance settings should not be changed without testing modem, WiFi and system stability.
+CPU performance settings should not be changed without testing modem, WiFi, USB gadget, and overall system stability.
 
 ---
 
@@ -138,13 +140,21 @@ Provides cellular signal and serving-cell information.
 - `uci-usb-gadget`
 - `luci-app-usb-gadget`
 
-Provides USB gadget management including USB Ethernet/RNDIS functionality.
+Provides USB gadget management, including USB Ethernet/RNDIS/NCM functionality.
 
 ### UZ801 LEDs
 
 - `uz801-leds`
 
 Provides persistent runtime control of the three main UZ801 LEDs.
+
+### QMI recovery
+
+- `zhihe-qmi` includes `zhihe-qmi-recovery.init`
+
+The recovery service monitors `/dev/wwan0qmi0`. If the QMI device disappears and later reappears after a modem recovery, the service checks the QMI data-session state and can restart the `QMI` network interface when the WDS session is disconnected.
+
+The service is installed and enabled at boot by the `zhihe-qmi` package.
 
 ---
 
@@ -228,6 +238,35 @@ No manual LED configuration is required after installation.
 
 ---
 
+## QMI modem recovery
+
+The UZ801 can experience a modem-side (`remoteproc0` / MPSS) failure during some LTE link failures. In the tested configuration, the Qualcomm modem subsystem can recover without rebooting the whole OpenWrt system, but the QMI data session may remain disconnected afterward.
+
+The project therefore includes:
+
+```text
+/etc/init.d/zhihe-qmi-recovery
+```
+
+The recovery logic is designed to:
+
+1. Detect disappearance of `/dev/wwan0qmi0`.
+2. Wait for the QMI device to reappear after modem recovery.
+3. Check whether the `QMI` network interface is still up.
+4. Check the QMI WDS packet-service state.
+5. If WDS is disconnected, restart the `QMI` interface.
+6. Allow `zhihe-qmi` to establish a new data session.
+
+The recovery mechanism does **not** intentionally crash or reset the modem subsystem. It operates at the QMI/network-session layer and is intended to preserve the existing remoteproc recovery behavior.
+
+The corresponding source file is:
+
+```text
+packages/zhihe-qmi/files/zhihe-qmi-recovery.init
+```
+
+---
+
 ## Default access after first boot
 
 | Item | Value |
@@ -235,11 +274,11 @@ No manual LED configuration is required after installation.
 | LAN IP | `192.168.2.1` |
 | Hostname | `OpenWRT-UZ801` |
 | WiFi SSID | `OpenWRT-UZ801` |
-| USB RNDIS | Enabled by default |
+| USB Ethernet/RNDIS/NCM | Enabled by default |
 | LuCI / SSH | Available on LAN |
 | LuCI / SSH over USB Ethernet | Available |
 
-Even if WiFi or the cellular modem fails, USB Ethernet/RNDIS provides an additional way to reach the device.
+Even if WiFi or the cellular modem fails, USB Ethernet/gadget access provides an additional way to reach the device.
 
 LuCI:
 
@@ -291,6 +330,8 @@ The device can also be placed into EDL mode using the appropriate hardware EDL p
 
 ## Building
 
+### Local Linux build
+
 Clone the repository:
 
 ```bash
@@ -320,7 +361,35 @@ Important artifacts include:
 flash.sh
 ```
 
-The `uz801-leds` package is automatically included in the `yiming-uz801v3` device profile.
+The `uz801-leds` and `zhihe-qmi` packages are included in the UZ801 device build.
+
+### GitHub Actions
+
+The repository includes GitHub Actions workflows:
+
+```text
+.github/workflows/build-openwrt.yml
+.github/workflows/build-packages.yml
+```
+
+The firmware workflow is:
+
+```text
+Build OpenWrt for UZ801
+```
+
+It is started manually from GitHub Actions using `workflow_dispatch`.
+
+The firmware workflow:
+
+1. Checks out the repository.
+2. Selects the latest OpenWrt `v25.12.x` tag.
+3. Applies the project patches and platform files.
+4. Copies the custom packages.
+5. Applies `diffconfig_uz801`.
+6. Downloads sources.
+7. Builds OpenWrt.
+8. Creates a GitHub Release containing the build artifacts.
 
 ---
 
@@ -345,14 +414,124 @@ chmod +x flash.sh
 ./flash.sh
 ```
 
-The flashing process will:
+The flashing script asks how `rootfs_data` should be handled before starting the destructive part of the operation.
 
-1. Flash the new GPT.
-2. Flash bootloader images.
-3. Flash the OpenWrt boot image.
-4. Flash the OpenWrt root filesystem.
-5. Write the device-specific radio partitions.
-6. Reboot the device.
+### rootfs_data handling
+
+The UZ801 uses:
+
+```text
+/dev/mmcblk0p15
+```
+
+as `rootfs_data` / OpenWrt overlay storage.
+
+The flash script provides five choices:
+
+```text
+1) Keep current rootfs_data
+2) Backup + Restore rootfs_data
+3) Erase + Recreate rootfs_data
+4) Backup rootfs_data only
+5) Abort
+```
+
+#### 1) Keep current rootfs_data
+
+The partition is left unchanged.
+
+This preserves:
+
+- OpenWrt configuration
+- installed package state stored in overlay
+- user files
+- persistent settings
+
+This is the default choice.
+
+#### 2) Backup + Restore rootfs_data
+
+The script first reads the complete `rootfs_data` partition into a backup image.
+
+After the new firmware is flashed, the same backup is written back to `rootfs_data`.
+
+A timestamped backup is created, for example:
+
+```text
+rootfs_data-backup-20260817-123456.img
+```
+
+The script verifies the backup size before continuing.
+
+#### 3) Erase + Recreate rootfs_data
+
+The script intentionally does **not** use:
+
+```text
+edl e rootfs_data
+```
+
+for the entire large partition.
+
+Instead, it invalidates the existing filesystem by overwriting the beginning of the partition. On first boot, the OpenWrt preinit script:
+
+```text
+msm89xx/base-files/lib/preinit/79-format-rootfs-data
+```
+
+detects that the partition no longer has a valid ext4 filesystem and runs:
+
+```text
+mkfs.ext4 -F -L rootfs_data -O ^has_journal
+```
+
+The device then reboots into the newly created filesystem.
+
+**All existing `rootfs_data` contents are lost in this mode.**
+
+#### 4) Backup rootfs_data only
+
+The script creates a complete `rootfs_data` backup and exits without flashing the device.
+
+#### 5) Abort
+
+No flashing operation is performed.
+
+---
+
+## Important rootfs_data notes
+
+The current UZ801 GPT layout defines `rootfs_data` as the remaining space after the 128 MiB `rootfs` partition.
+
+The current layout uses:
+
+```text
+rootfs_data start sector : 610338
+rootfs_data size         : 6959037 sectors
+```
+
+The project has an explicit preinit formatter for an invalid or empty `rootfs_data` filesystem.
+
+This design avoids depending on a full-partition Firehose erase for `rootfs_data`.
+
+---
+
+## Flashing sequence
+
+The flash script performs the following major steps:
+
+1. Detect the OpenWrt images.
+2. Detect/extract bootloader firmware.
+3. Locate and verify the device-specific radio backup.
+4. Ask how `rootfs_data` should be handled.
+5. Optionally back up `rootfs_data`.
+6. Flash the new GPT.
+7. Flash bootloader components.
+8. Flash OpenWrt boot.
+9. Flash OpenWrt rootfs.
+10. Apply the selected `rootfs_data` handling mode.
+11. Restore the device-specific radio partitions.
+12. Reboot the device.
 
 ### Warning
 
@@ -373,7 +552,7 @@ Always keep a complete EDL backup of the original device.
 
 ## After first boot – cellular setup
 
-Connect to the modem through USB RNDIS or WiFi.
+Connect to the modem through USB Ethernet/gadget or WiFi.
 
 Open LuCI:
 
@@ -411,6 +590,18 @@ and the QMI device is typically:
 
 ## If the modem stays offline
 
+### Check the QMI session
+
+```bash
+qmicli -d /dev/wwan0qmi0 --wds-get-packet-service-status
+```
+
+A working data session should report:
+
+```text
+Connection status: 'connected'
+```
+
 ### MCFG
 
 Try another region-specific `MCFG_SW.MBN`.
@@ -446,6 +637,26 @@ WCNSS_qcom_wlan_nv.bin
 MCFG_SW.MBN
 ```
 
+### QMI recovery
+
+After a modem-side recovery, check:
+
+```bash
+ls -l /dev/wwan0qmi0
+```
+
+and:
+
+```bash
+qmicli -d /dev/wwan0qmi0 --wds-get-packet-service-status
+```
+
+The automatic recovery service is:
+
+```text
+/etc/init.d/zhihe-qmi-recovery
+```
+
 ---
 
 ## Project layout
@@ -453,19 +664,26 @@ MCFG_SW.MBN
 ```text
 uz801-pureOpenwrt2/
 │
+├── .github/
+│   └── workflows/
+│       ├── build-openwrt.yml
+│       └── build-packages.yml
+│
 ├── msm89xx/
 │   ├── base-files/
-│   │   └── lib/
-│   │       └── firmware/
-│   │           # Embedded modem + WiFi firmware
+│   │   ├── lib/
+│   │   │   ├── firmware/
+│   │   │   └── preinit/
+│   │   │       └── 79-format-rootfs-data
 │   │
 │   ├── image/
+│   │   ├── flash.sh
+│   │   ├── generate_firmware.sh
+│   │   ├── generate_squashfs_gpt.sh
 │   │   └── msm8916.mk
-│   │       # UZ801 device profile and DEVICE_PACKAGES
 │   │
 │   └── patches/
 │       └── 803-arm64-dts-qcom-swap-leds-uz801.patch
-│           # UZ801 LED Device Tree definitions
 │
 ├── packages/
 │   ├── uz801-leds/
@@ -474,6 +692,11 @@ uz801-pureOpenwrt2/
 │   │       └── uz801-leds.init
 │   │
 │   ├── zhihe-qmi/
+│   │   ├── Makefile
+│   │   └── files/
+│   │       ├── zhiheqmi.sh
+│   │       └── zhihe-qmi-recovery.init
+│   │
 │   ├── luci-proto-zhiheqmi/
 │   ├── modem-at-engine/
 │   ├── sms-sqlite-sync/
@@ -488,6 +711,7 @@ uz801-pureOpenwrt2/
 │       ├── modemst1.bin
 │       └── modemst2.bin
 │
+├── apply_patches.sh
 ├── build.sh
 └── diffconfig_uz801
 ```
@@ -503,18 +727,17 @@ CPU cores:       2
 Maximum CPU:     800 MHz
 ```
 
-This configuration is currently preferred because the modem has demonstrated stable operation under this setting.
+The device has shown stable operation with this configuration.
 
-The following components should be considered together when evaluating stability:
+Current stability observations include:
 
-- Qualcomm modem subsystem
-- `zhihe-qmi`
-- WiFi / WCNSS
-- USB gadget
-- CPU frequency configuration
-- eMMC / overlay filesystem
+- OpenWrt boots without the previous repeated system reboot behavior.
+- USB Ethernet remains available as a recovery/access path.
+- WiFi remains operational.
+- LTE/QMI can recover from some modem-side failures without rebooting the whole device.
+- The `zhihe-qmi` recovery service is designed to re-establish the data session after the QMI device returns.
 
-Avoid changing several of these components simultaneously when troubleshooting stability.
+When troubleshooting, avoid changing several components simultaneously.
 
 ---
 
@@ -524,10 +747,13 @@ Avoid changing several of these components simultaneously when troubleshooting s
 - `msm-firmware-dumper` is intentionally disabled because the required firmware is supplied from the local factory backup.
 - ModemManager is intentionally removed from this build.
 - The cellular stack uses the custom `zhihe-qmi` implementation.
-- USB RNDIS is kept enabled as an additional recovery/access method.
+- USB Ethernet/gadget access is kept enabled as an additional recovery/access method.
 - Radio/NV partitions must always come from the same physical device.
 - Always keep a complete EDL backup before experimenting with partitions or firmware.
-- Bootloader components `rpm.mbn`, `sbl1.mbn` and `tz.mbn` still come from the Qualcomm DragonBoard 410c reference package through `generate_firmware.sh`. This is intentional for mainline compatibility.
+- `rootfs_data` contains persistent OpenWrt state. Use the `Keep` option during normal firmware upgrades unless a reset is intentionally required.
+- The `Erase + Recreate` option destroys existing `rootfs_data` contents.
+- The bootloader components `rpm.mbn`, `sbl1.mbn` and `tz.mbn` still come from the Qualcomm DragonBoard 410c reference package through `generate_firmware.sh`. This is intentional for mainline compatibility.
+- The project should be treated as device-specific firmware work. Do not flash radio/NV data from another unit.
 
 ---
 
