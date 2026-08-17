@@ -1,0 +1,36 @@
+#!/bin/sh /etc/rc.common
+
+START=15
+STOP=90
+
+CONFIG=/etc/config/uz801cpu
+CPU_ROOT=/sys/devices/system/cpu
+POLICY=$CPU_ROOT/cpufreq/policy0
+
+apply() {
+	local cores min_freq max_freq governor i
+	[ -f "$CONFIG" ] || return 0
+	. /lib/functions.sh
+	config_load uz801cpu
+	config_get cores cpu cores 2
+	config_get min_freq cpu min_freq 200000
+	config_get max_freq cpu max_freq 800000
+	config_get governor cpu governor schedutil
+
+	[ -w "$POLICY/scaling_max_freq" ] || return 0
+
+	for i in 1 2 3; do
+		if [ "$i" -lt "$cores" ]; then
+			[ -w "$CPU_ROOT/cpu$i/online" ] && echo 1 > "$CPU_ROOT/cpu$i/online" 2>/dev/null || true
+		else
+			[ -w "$CPU_ROOT/cpu$i/online" ] && echo 0 > "$CPU_ROOT/cpu$i/online" 2>/dev/null || true
+		fi
+	done
+
+	echo "$max_freq" > "$POLICY/scaling_max_freq" 2>/dev/null || true
+	echo "$min_freq" > "$POLICY/scaling_min_freq" 2>/dev/null || true
+	echo "$governor" > "$POLICY/scaling_governor" 2>/dev/null || true
+}
+
+start() { apply; }
+stop() { return 0; }

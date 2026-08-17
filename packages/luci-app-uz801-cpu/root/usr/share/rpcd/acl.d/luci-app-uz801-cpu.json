@@ -1,0 +1,7 @@
+{
+	"luci-app-uz801-cpu": {
+		"description": "UZ801 CPU management",
+		"read": { "ubus": { "uz801_cpu": [ "status" ] } },
+		"write": { "ubus": { "uz801_cpu": [ "apply", "safe" ] } }
+	}
+}

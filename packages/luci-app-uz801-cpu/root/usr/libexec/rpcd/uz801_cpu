@@ -1,0 +1,77 @@
+#!/bin/sh
+. /usr/share/libubox/jshn.sh
+
+CPU_ROOT=/sys/devices/system/cpu
+POLICY=$CPU_ROOT/cpufreq/policy0
+INIT=/etc/init.d/uz801-cpu
+
+online_count() {
+	local n=1 i
+	for i in 1 2 3; do
+		[ -f "$CPU_ROOT/cpu$i/online" ] && [ "$(cat "$CPU_ROOT/cpu$i/online" 2>/dev/null)" = 1 ] && n=$((n+1))
+	done
+	echo "$n"
+}
+
+freq() {
+	local f="$CPU_ROOT/cpu$1/cpufreq/cpuinfo_cur_freq"
+	[ -r "$f" ] && cat "$f" && return
+	cat "$POLICY/cpuinfo_cur_freq" 2>/dev/null || echo 0
+}
+
+status() {
+	local i comma=0
+	printf '{'
+	printf '"online":"%s",' "$(cat "$CPU_ROOT/online" 2>/dev/null)"
+	printf '"online_count":%s,' "$(online_count)"
+	printf '"driver":"%s",' "$(cat "$POLICY/scaling_driver" 2>/dev/null)"
+	printf '"min_freq":%s,' "$(cat "$POLICY/scaling_min_freq" 2>/dev/null)"
+	printf '"max_freq":%s,' "$(cat "$POLICY/scaling_max_freq" 2>/dev/null)"
+	printf '"governor":"%s",' "$(cat "$POLICY/scaling_governor" 2>/dev/null)"
+	printf '"available_frequencies":"%s",' "$(cat "$POLICY/scaling_available_frequencies" 2>/dev/null)"
+	printf '"available_governors":"%s",' "$(cat "$POLICY/scaling_available_governors" 2>/dev/null)"
+	printf '"cpus":['
+	for i in 0 1 2 3; do
+		[ -d "$CPU_ROOT/cpu$i" ] || continue
+		[ "$comma" = 1 ] && printf ','
+		comma=1
+		if [ "$i" = 0 ]; then o=1; else o="$(cat "$CPU_ROOT/cpu$i/online" 2>/dev/null || echo 0)"; fi
+		printf '{"id":%s,"online":%s,"freq":%s}' "$i" "$o" "$(freq "$i")"
+	done
+	echo ']}'
+}
+
+apply_settings() {
+	local input cores min max gov
+	input="$(cat)"
+	json_load "$input" || { echo '{"error":"invalid JSON"}'; return 1; }
+	json_get_var cores cores; json_get_var min min_freq; json_get_var max max_freq; json_get_var gov governor
+	case "$cores" in 1|2|3|4) ;; *) echo '{"error":"invalid cores"}'; return 1;; esac
+	case "$min" in 200000|400000|800000|998400) ;; *) echo '{"error":"invalid minimum frequency"}'; return 1;; esac
+	case "$max" in 200000|400000|800000|998400) ;; *) echo '{"error":"invalid maximum frequency"}'; return 1;; esac
+	[ "$min" -le "$max" ] || { echo '{"error":"minimum exceeds maximum"}'; return 1; }
+	case "$gov" in powersave|performance|schedutil) ;; *) echo '{"error":"invalid governor"}'; return 1;; esac
+
+	uci -q set uz801cpu.settings.cores="$cores"
+	uci -q set uz801cpu.settings.min_freq="$min"
+	uci -q set uz801cpu.settings.max_freq="$max"
+	uci -q set uz801cpu.settings.governor="$gov"
+	uci -q commit uz801cpu
+	"$INIT" apply >/dev/null 2>&1 || { echo '{"error":"apply failed"}'; return 1; }
+	status
+}
+
+safe() {
+	uci -q set uz801cpu.settings.cores=2
+	uci -q set uz801cpu.settings.min_freq=200000
+	uci -q set uz801cpu.settings.max_freq=800000
+	uci -q set uz801cpu.settings.governor=schedutil
+	uci -q commit uz801cpu
+	"$INIT" apply >/dev/null 2>&1 || { echo '{"error":"safe profile failed"}'; return 1; }
+	status
+}
+
+case "$1" in
+list) echo '{ "status": {}, "apply": { "cores": 2, "min_freq": 200000, "max_freq": 800000, "governor": "schedutil" }, "safe": {} }' ;;
+call) case "$2" in status) status;; apply) apply_settings;; safe) safe;; *) exit 1;; esac ;;
+esac

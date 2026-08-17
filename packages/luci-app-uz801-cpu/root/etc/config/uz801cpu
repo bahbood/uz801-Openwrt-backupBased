@@ -1,0 +1,5 @@
+config cpu 'settings'
+	option cores '2'
+	option min_freq '200000'
+	option max_freq '800000'
+	option governor 'schedutil'

@@ -1,0 +1,7 @@
+{
+	"admin/system/uz801_cpu": {
+		"title": "UZ801 CPU",
+		"order": 58,
+		"action": { "type": "view", "path": "uz801_cpu/main" }
+	}
+}
