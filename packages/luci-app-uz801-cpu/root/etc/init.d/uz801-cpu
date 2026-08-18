@@ -2,7 +2,8 @@
 
 START=15
 STOP=90
-
+EXTRA_COMMANDS="apply"
+EXTRA_HELP="        apply    Apply CPU settings without restarting the service"
 CONFIG=/etc/config/uz801cpu
 CPU_ROOT=/sys/devices/system/cpu
 POLICY=$CPU_ROOT/cpufreq/policy0
@@ -12,10 +13,10 @@ apply() {
 	[ -f "$CONFIG" ] || return 0
 	. /lib/functions.sh
 	config_load uz801cpu
-	config_get cores cpu cores 2
-	config_get min_freq cpu min_freq 200000
-	config_get max_freq cpu max_freq 800000
-	config_get governor cpu governor schedutil
+	config_get cores settings cores 2
+	config_get min_freq settings min_freq 200000
+	config_get max_freq settings max_freq 800000
+	config_get governor settings governor schedutil
 
 	[ -w "$POLICY/scaling_max_freq" ] || return 0
 
@@ -32,5 +33,10 @@ apply() {
 	echo "$governor" > "$POLICY/scaling_governor" 2>/dev/null || true
 }
 
-start() { apply; }
-stop() { return 0; }
+start() {
+	apply
+}
+
+stop() {
+	return 0
+}
