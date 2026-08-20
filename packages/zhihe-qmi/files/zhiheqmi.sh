@@ -2,17 +2,18 @@
 #
 # Zhihe/YiMing QMI protocol handler for OpenWrt netifd.
 #
-# Features:
-#   - Stable profile-based WDS startup.
-#   - IPv4 support.
-#   - IPv6 support.
-#   - Safe WDS PID handling.
-#   - IPv6 offlink address handling for point-to-point wwan0.
-#   - IPv6 gateway host route before default route.
+# Policy:
+#   - IPv4 is REQUIRED.
+#   - IPv6 is OPTIONAL.
+#   - If IPv4 is available, the interface is considered successful.
+#   - If IPv6 is also available, IPv6 address/DNS/route are added.
+#   - IPv6-only sessions are NOT accepted.
 #
-# Important:
-#   Do not poll WDS status while --wds-follow-network is running.
-#   This caused endpoint hangup / transaction timeout on UZ801.
+# Stability:
+#   - Preserve the original profile-based WDS startup.
+#   - Do NOT poll --wds-get-packet-service-status while
+#     --wds-follow-network is running.
+#   - Protect against stale WDS pidfiles.
 #
 
 [ -n "$INCLUDE_ONLY" ] || {
@@ -38,7 +39,6 @@ proto_zhiheqmi_kill_wds() {
 	pid=$(cat "$pidfile" 2>/dev/null)
 
 	if [ -n "$pid" ] && [ -d "/proc/$pid" ]; then
-
 		if tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null |
 			grep -q "qmicli"; then
 
@@ -117,7 +117,9 @@ proto_zhiheqmi_apply_settings() {
 	local dns6_2
 
 	#
+	# ---------------------------------------------------------
 	# IPv4
+	# ---------------------------------------------------------
 	#
 
 	ip=$(
@@ -157,7 +159,9 @@ proto_zhiheqmi_apply_settings() {
 	)
 
 	#
+	# ---------------------------------------------------------
 	# IPv6
+	# ---------------------------------------------------------
 	#
 
 	ip6=$(
@@ -206,75 +210,93 @@ proto_zhiheqmi_apply_settings() {
 	)
 
 	#
-	# IPv4 CIDR
+	# ---------------------------------------------------------
+	# IPv4 is REQUIRED
+	# ---------------------------------------------------------
 	#
 
-	if [ -n "$mask" ]; then
-		cidr=$(mask_to_cidr "$mask")
-	fi
+	if [ -z "$ip" ] || [ -z "$mask" ]; then
+		logger -t zhihe-qmi \
+			"IPv4 settings are missing; IPv4 is required"
 
-	#
-	# At least one family must exist.
-	#
-
-	if [ -z "$ip" ] && [ -z "$ip6" ]; then
 		return 1
 	fi
 
+	cidr=$(mask_to_cidr "$mask")
+
 	#
+	# ---------------------------------------------------------
 	# Logging
+	# ---------------------------------------------------------
 	#
 
-	if [ -n "$ip" ]; then
-		logger -t zhihe-qmi \
-			"IPv4: $ip/$cidr, GW: $gw, DNS: $dns1, $dns2"
-	fi
+	logger -t zhihe-qmi \
+		"IPv4: $ip/$cidr, GW: $gw, DNS: $dns1, $dns2"
 
-	if [ -n "$ip6" ]; then
+	if [ -n "$ip6" ] && [ -n "$ip6_prefix" ]; then
+
 		logger -t zhihe-qmi \
 			"IPv6: $ip6/$ip6_prefix, GW: $gw6, DNS: $dns6_1, $dns6_2"
+
+	else
+
+		logger -t zhihe-qmi \
+			"IPv6: not available; continuing with IPv4"
+
 	fi
 
 	#
-	# Start netifd update.
+	# ---------------------------------------------------------
+	# Start netifd update
+	# ---------------------------------------------------------
 	#
 
 	proto_init_update "$iface" 1
 
 	#
-	# IPv4
+	# ---------------------------------------------------------
+	# IPv4 address
+	# ---------------------------------------------------------
 	#
 
-	if [ -n "$ip" ] && [ -n "$cidr" ]; then
+	proto_add_ipv4_address \
+		"$ip" \
+		"$cidr" \
+		"" \
+		"$gw"
 
-		proto_add_ipv4_address \
-			"$ip" \
-			"$cidr" \
-			"" \
+	#
+	# IPv4 default route
+	# ---------------------------------------------------------
+	#
+
+	if [ -n "$gw" ]; then
+
+		proto_add_ipv4_route \
+			"0.0.0.0" \
+			0 \
 			"$gw"
 
-		if [ -n "$gw" ]; then
-			proto_add_ipv4_route \
-				"0.0.0.0" \
-				0 \
-				"$gw"
-		else
-			proto_add_ipv4_route \
-				"0.0.0.0" \
-				0
-		fi
+	else
+
+		proto_add_ipv4_route \
+			"0.0.0.0" \
+			0
 	fi
 
 	#
-	# IPv6
-	#
-	# The UZ801 wwan0 interface is point-to-point.
-	#
-	# offlink=1 is important here. Our direct test proved that
-	# netifd can install the global IPv6 address on wwan0 with it.
+	# ---------------------------------------------------------
+	# Optional IPv6
+	# ---------------------------------------------------------
 	#
 
 	if [ -n "$ip6" ] && [ -n "$ip6_prefix" ]; then
+
+		#
+		# UZ801 wwan0 is point-to-point.
+		# offlink=1 was verified manually on the device and
+		# allows the global IPv6 address to be installed.
+		#
 
 		proto_add_ipv6_address \
 			"$ip6" \
@@ -284,9 +306,13 @@ proto_zhiheqmi_apply_settings() {
 			1
 
 		#
-		# The QMI IPv6 gateway is a global address.
-		# Add it as a /128 route first so Linux can resolve
-		# the next-hop before installing the default route.
+		# The QMI gateway is optional.
+		#
+		# Add a host route to the gateway first, then try
+		# installing the IPv6 default route.
+		#
+		# Failure to install IPv6 route MUST NOT make IPv4
+		# connection fail.
 		#
 
 		if [ -n "$gw6" ]; then
@@ -302,18 +328,16 @@ proto_zhiheqmi_apply_settings() {
 
 		else
 
-			#
-			# Fallback for sessions without an explicit gateway.
-			#
+			logger -t zhihe-qmi \
+				"IPv6 address available but IPv6 gateway is missing"
 
-			proto_add_ipv6_route \
-				"::" \
-				0
 		fi
 	fi
 
 	#
+	# ---------------------------------------------------------
 	# IPv4 DNS
+	# ---------------------------------------------------------
 	#
 
 	if [ -n "$dns1" ]; then
@@ -325,7 +349,9 @@ proto_zhiheqmi_apply_settings() {
 	fi
 
 	#
-	# IPv6 DNS
+	# ---------------------------------------------------------
+	# Optional IPv6 DNS
+	# ---------------------------------------------------------
 	#
 
 	if [ -n "$dns6_1" ]; then
@@ -337,7 +363,9 @@ proto_zhiheqmi_apply_settings() {
 	fi
 
 	#
+	# ---------------------------------------------------------
 	# MTU
+	# ---------------------------------------------------------
 	#
 
 	if [ -n "$mtu" ]; then
@@ -345,7 +373,8 @@ proto_zhiheqmi_apply_settings() {
 	fi
 
 	#
-	# Send IPv4 + IPv6 together in ONE update.
+	# IMPORTANT:
+	# IPv4 and optional IPv6 are sent together in one update.
 	#
 
 	proto_send_update "$config"
@@ -378,7 +407,9 @@ proto_zhiheqmi_setup() {
 		"Starting connection on $iface ($device) with APN: $apn, Profile: $profile"
 
 	#
-	# Wait for QMI device.
+	# ---------------------------------------------------------
+	# Wait for QMI device
+	# ---------------------------------------------------------
 	#
 
 	elapsed=0
@@ -407,13 +438,17 @@ proto_zhiheqmi_setup() {
 	fi
 
 	#
-	# Bring interface up.
+	# ---------------------------------------------------------
+	# Bring network interface up
+	# ---------------------------------------------------------
 	#
 
 	ip link set "$iface" up 2>/dev/null || true
 
 	#
-	# Put modem online.
+	# ---------------------------------------------------------
+	# Put modem online
+	# ---------------------------------------------------------
 	#
 
 	qmicli \
@@ -426,7 +461,9 @@ proto_zhiheqmi_setup() {
 		"Waiting for network registration..."
 
 	#
-	# Wait for network registration.
+	# ---------------------------------------------------------
+	# Wait for network registration
+	# ---------------------------------------------------------
 	#
 
 	registered=0
@@ -470,11 +507,19 @@ proto_zhiheqmi_setup() {
 		"Registered to network."
 
 	#
-	# Keep the original UZ801 WDS startup behavior.
+	# ---------------------------------------------------------
+	# Start WDS
 	#
-	# Do NOT poll --wds-get-packet-service-status while the
-	# qmicli --wds-follow-network process is running.
+	# IMPORTANT:
+	# Keep the original stable behavior.
 	#
+	# Do NOT call --wds-get-packet-service-status while
+	# --wds-follow-network is active.
+	# ---------------------------------------------------------
+	#
+
+	logger -t zhihe-qmi \
+		"WDS start requested for profile $profile"
 
 	qmicli \
 		-d "$device" \
@@ -486,11 +531,14 @@ proto_zhiheqmi_setup() {
 
 	echo "$!" > "/var/run/zhiheqmi_${config}.pid"
 
-	logger -t zhihe-qmi \
-		"WDS start requested for profile $profile"
-
 	#
-	# Wait for IPv4 or IPv6 settings.
+	# ---------------------------------------------------------
+	# Wait for IPv4 settings
+	#
+	# IPv4 is mandatory.
+	#
+	# We intentionally do NOT accept IPv6-only settings.
+	# ---------------------------------------------------------
 	#
 
 	ip_ready=0
@@ -503,7 +551,7 @@ proto_zhiheqmi_setup() {
 		if [ -n "$settings" ]; then
 
 			if echo "$settings" |
-				grep -qE "IPv4 address:|IPv6 address:"; then
+				grep -q "IPv4 address:"; then
 
 				ip_ready=1
 				break
@@ -517,7 +565,7 @@ proto_zhiheqmi_setup() {
 	if [ "$ip_ready" -eq 0 ]; then
 
 		logger -t zhihe-qmi \
-			"IP settings not available after 60 seconds"
+			"IPv4 settings not available after 60 seconds"
 
 		proto_zhiheqmi_kill_wds "$config"
 
@@ -530,7 +578,9 @@ proto_zhiheqmi_setup() {
 	fi
 
 	#
-	# Read final settings once more.
+	# ---------------------------------------------------------
+	# Get final settings
+	# ---------------------------------------------------------
 	#
 
 	settings=$(proto_zhiheqmi_get_settings "$device")
@@ -538,7 +588,7 @@ proto_zhiheqmi_setup() {
 	if [ -z "$settings" ]; then
 
 		logger -t zhihe-qmi \
-			"Current settings unavailable after WDS start"
+			"Current settings unavailable after IPv4 became ready"
 
 		proto_zhiheqmi_kill_wds "$config"
 
@@ -551,7 +601,9 @@ proto_zhiheqmi_setup() {
 	fi
 
 	#
-	# Apply IPv4/IPv6 to netifd.
+	# ---------------------------------------------------------
+	# Apply IPv4 + optional IPv6
+	# ---------------------------------------------------------
 	#
 
 	if ! proto_zhiheqmi_apply_settings \
@@ -574,6 +626,8 @@ proto_zhiheqmi_setup() {
 
 	logger -t zhihe-qmi \
 		"QMI network setup complete"
+
+	return 0
 }
 
 proto_zhiheqmi_teardown() {
